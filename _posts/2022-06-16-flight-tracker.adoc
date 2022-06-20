@@ -1,1 +1,61 @@
-test
+---
+layout: post
+title: 'Building a live flight tracking distributed app with Quarkus'
+date: 2022-06-20
+tags:
+synopsis: ''
+author: gwenneg
+---
+:imagesdir: /assets/images/posts/flight-tracker
+
+== Introduction
+
+I recently gave a talk at Bordeaux and Toulouse in France as part of the Quarkus World Tour 2022.
+That talk was actually a live coding session during which I built a live flight tracking distributed app with Quarkus.
+In this post, we will follow all the steps of that live coding session and build the same application.
+
+The complete source code of the app is available on GitHub in the https://github.com/gwenneg/flight-tracker-demo[gwenneg/flight-tracker-demo] repository.
+
+This post will show you how to use Quarkus and its extensions ecosystem to build a complex and hopefully fun demo.
+It will not go into the details of each extension.
+
+== What is live flight tracking?
+
+Before we start talking about
+
+
+
+
+
+
+
+
+
+
+
+
+
+== What is a live flight tracking app?
+
+Flight tracking apps usually aggregate data from several sources to determine the position of all aicrafts in the skies.
+These sources can be MLAT, ADS-B, radar data, etc
+
+== Source code
+
+https://github.com/gwenneg/flight-tracker-demo
+
+
+== Simplifications
+
+== The architecture
+
+== Data-simulator
+
+== Data-aggregator
+
+== Map-service
+
+== Deploying everything on OpenShift
+
+RHOSAK
+
