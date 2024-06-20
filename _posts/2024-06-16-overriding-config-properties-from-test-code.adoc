@@ -33,81 +33,33 @@ public class MyService {
 ----
 
 Overriding a config property from the test code of a Quarkus app can be done in many ways.
-This blog post will show you several of them with a particular focus on the benefits and drawbacks of each approach.
+This post will show you several of them with a particular focus on the benefits and drawbacks of each approach.
 
 [NOTE]
 ====
-All examples from this blog post (and more!) are available as code in the https://github.com/gwenneg/blog-overriding-config-properties-from-test-code[gwenneg/blog-overriding-config-properties-from-test-code] repository.
+All examples from this post (and more!) are available as code in the https://github.com/gwenneg/blog-overriding-config-properties-from-test-code[gwenneg/blog-overriding-config-properties-from-test-code] repository.
 ====
 
 Personal opinion and experience.
 
 == Approach #1: Quarkus test profiles
 
-https://quarkus.io/guides/getting-started-testing#testing_different_profiles[Quarkus test profiles] are one of the best ways to override the configuration while executing tests.
+https://quarkus.io/guides/getting-started-testing#testing_different_profiles[Quarkus test profiles] are one of the best ways to override the configuration while executing tests:
 
-They can be used while running tests in native mode, unlike most approaches listed in this post.
-They are provided by the `quarkus-junit5` extension which you probably already depend on in your project.
+* They can be used while running tests in native mode, unlike most approaches listed in this post.
+* They do not require any dependency besides `quarkus-junit5` which is usually present in most projects.
+* They are not limited to overriding the configuration and provide https://quarkus.io/guides/getting-started-testing#writing-a-profile[many additional capabilities].
 
+However, Quarkus test profiles also suffer from a few drawbacks:
 
+* Each test profile requires a Quarkus restart which slows down the tests execution.
+* Tests have to be split into several test profiles and classes to cover multiple values of the same config properties.
 
+While these drawbacks may be perfectly acceptable in small to medium sized projects, they can become a real issue in bigger projects with lots of test profiles.
 
-They will help you override the configuration while running tests in native mode.
+Now let's take a quick look at how test profiles are used.
 
-
-
-
-
-They will work in native mode, unlike most other approaches listed in this blog post.
-
-
-
-
-They work with all kinds of tests, in both JVM mode and native image mode.
-They are
-
-
-
-
-They only require the `quarkus-junit5` extension and do not require any extra dependency.
-
-
-
-
-They don't require any extra dependency and are available as long as `quarkus-junit5` is in the classpath.
-
-
-
-
-
-
-
-They work with all kinds of tests and
-
-
-an excellent way to override the configuration while executing tests.
-Although suffering from a few limitations listed below, you should definitely give them a try as there is a good chance they will provide exactly what your project needs, especially in small to medium-sized projects.
-
-[cols="a,a"]
-|===
-|Benefits|Drawbacks
-
-|
-* They work in native mode.
-* They provide https://quarkus.io/guides/getting-started-testing#writing-a-profile[many additional capabilities].
-* No extra dependency is required.
-* They work with all kinds of tests, as the entire Quarkus app is started.
-|
-* Each profile requires a Quarkus restart which can slow down the tests execution.
-* Tests have to be split into several test profiles and classes to cover multiple values of the same config property.
-* They require extra maintenance work in bigger projects that require lots of profiles.
-|===
-
-
-
-
-
-[source, java]
+[source, java, title=The code to be tested]
 ----
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
@@ -127,10 +79,9 @@ public class FeaturesResource {
 }
 ----
 
-[source, java]
+[source, java, title=The test profile]
 ----
 import io.quarkus.test.junit.QuarkusTestProfile;
-
 import java.util.Map;
 
 public class FeaturesTestProfile implements QuarkusTestProfile { // <1>
@@ -143,10 +94,10 @@ public class FeaturesTestProfile implements QuarkusTestProfile { // <1>
     }
 }
 ----
-<1> TODO other methods
-<2> TODO works with everything: configprop, configmapping, etc
+<1> `QuarkusTestProfile` offers https://quarkus.io/guides/getting-started-testing#writing-a-profile[many additional capabilities] besides overriding the test configuration.
+<2> This method works with all ways of retrieving the config values: `@ConfigProperty`, `@ConfigMapping` or even `ConfigProvider.getConfig().getValue(...)`.
 
-[source, java]
+[source, java, title=The test code]
 ----
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
@@ -166,13 +117,11 @@ public class FeaturesResourceTest {
     }
 }
 ----
-<1> TODO
+<1> The test profile needs to be declared with `@TestProfile` on the test class.
 
+== Approach #2: mocking the config with Mockito
 
-
-does not allow to test several values with a single test class
-
-== Approach #2: Mocking the config with Mockito
+Here's an alternative to Quarkus test profiles which can
 
 [source, java]
 ----
