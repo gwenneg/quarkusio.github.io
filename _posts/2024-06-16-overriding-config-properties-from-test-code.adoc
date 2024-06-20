@@ -1,0 +1,609 @@
+---
+layout: post
+title: 'Overriding config properties from test code'
+date: 2024-06-16
+tags: config test development-tips
+synopsis: TODO
+author: gwenneg
+---
+:imagesdir: /assets/images/posts/overriding-config-properties-from-test-code
+
+Overriding config properties from test code is often required to achieve a good test coverage.
+Whenever a config property determines how an application behaves, all possible config values need to be tested.
+
+[source, java]
+----
+import jakarta.enterprise.context.ApplicationScoped;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
+
+@ApplicationScoped
+public class MyService {
+
+    @ConfigProperty(name = "awesome-feature-enabled", defaultValue = "false")
+    boolean awesomeFeatureEnabled;
+
+    public void doSomething() {
+        if (awesomeFeatureEnabled) {
+            // This branch needs to be tested.
+        } else {
+            // So does that branch.
+        }
+    }
+}
+----
+
+Overriding a config property from the test code of a Quarkus app can be done in many ways.
+This blog post will show you several of them with a particular focus on the benefits and drawbacks of each approach.
+
+[NOTE]
+====
+All examples from this blog post (and more!) are available as code in the https://github.com/gwenneg/blog-overriding-config-properties-from-test-code[gwenneg/blog-overriding-config-properties-from-test-code] repository.
+====
+
+Personal opinion and experience.
+
+== Approach #1: Quarkus test profiles
+
+https://quarkus.io/guides/getting-started-testing#testing_different_profiles[Quarkus test profiles] are one of the best ways to override the configuration while executing tests.
+
+They can be used while running tests in native mode, unlike most approaches listed in this post.
+They are provided by the `quarkus-junit5` extension which you probably already depend on in your project.
+
+
+
+
+They will help you override the configuration while running tests in native mode.
+
+
+
+
+
+They will work in native mode, unlike most other approaches listed in this blog post.
+
+
+
+
+They work with all kinds of tests, in both JVM mode and native image mode.
+They are
+
+
+
+
+They only require the `quarkus-junit5` extension and do not require any extra dependency.
+
+
+
+
+They don't require any extra dependency and are available as long as `quarkus-junit5` is in the classpath.
+
+
+
+
+
+
+
+They work with all kinds of tests and
+
+
+an excellent way to override the configuration while executing tests.
+Although suffering from a few limitations listed below, you should definitely give them a try as there is a good chance they will provide exactly what your project needs, especially in small to medium-sized projects.
+
+[cols="a,a"]
+|===
+|Benefits|Drawbacks
+
+|
+* They work in native mode.
+* They provide https://quarkus.io/guides/getting-started-testing#writing-a-profile[many additional capabilities].
+* No extra dependency is required.
+* They work with all kinds of tests, as the entire Quarkus app is started.
+|
+* Each profile requires a Quarkus restart which can slow down the tests execution.
+* Tests have to be split into several test profiles and classes to cover multiple values of the same config property.
+* They require extra maintenance work in bigger projects that require lots of profiles.
+|===
+
+
+
+
+
+[source, java]
+----
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.Path;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
+
+@Path("/features")
+public class FeaturesResource {
+
+    @ConfigProperty(name = "awesome-feature-enabled", defaultValue = "false")
+    boolean awesomeFeatureEnabled;
+
+    @GET
+    @Path("/awesome")
+    public boolean isAwesomeFeatureEnabled() {
+        return awesomeFeatureEnabled;
+    }
+}
+----
+
+[source, java]
+----
+import io.quarkus.test.junit.QuarkusTestProfile;
+
+import java.util.Map;
+
+public class FeaturesTestProfile implements QuarkusTestProfile { // <1>
+
+    @Override
+    public Map<String, String> getConfigOverrides() { // <2>
+        return Map.of(
+            "awesome-feature-enabled", "true"
+        );
+    }
+}
+----
+<1> TODO other methods
+<2> TODO works with everything: configprop, configmapping, etc
+
+[source, java]
+----
+import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.junit.TestProfile;
+import io.restassured.RestAssured;
+import org.hamcrest.CoreMatchers;
+import org.junit.jupiter.api.Test;
+
+@QuarkusTest
+@TestProfile(FeaturesTestProfile.class) // <1>
+public class FeaturesResourceTest {
+
+    @Test
+    void test() {
+        RestAssured.given()
+            .when().get("/features/awesome")
+            .then().body(CoreMatchers.is("true"));
+    }
+}
+----
+<1> TODO
+
+
+
+does not allow to test several values with a single test class
+
+== Approach #2: Mocking the config with Mockito
+
+[source, java]
+----
+import jakarta.enterprise.context.ApplicationScoped;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
+
+@ApplicationScoped
+public class FeaturesConfig {
+
+    @ConfigProperty(name = "awesome-feature-enabled", defaultValue = "false")
+    boolean awesomeFeatureEnabled;
+
+    public boolean isAwesomeFeatureEnabled() {
+        return awesomeFeatureEnabled;
+    }
+}
+----
+
+[source, java]
+----
+import jakarta.inject.Inject;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.Path;
+
+@Path("/features")
+public class FeaturesResource {
+
+    @Inject
+    FeaturesConfig featuresConfig;
+
+    @GET
+    @Path("/awesome")
+    public boolean isAwesomeFeatureEnabled() {
+        return featuresConfig.isAwesomeFeatureEnabled();
+    }
+}
+----
+
+[source, java]
+----
+import io.quarkus.test.InjectMock;
+import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.RestAssured;
+import org.hamcrest.CoreMatchers;
+import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
+
+@QuarkusTest
+class FeaturesResourceTest {
+
+    @InjectMock
+    FeaturesConfig featuresConfig;
+
+    @Test
+    void test() {
+
+        Mockito.when(featuresConfig.isAwesomeFeatureEnabled()).thenReturn(true); // <1>
+
+        RestAssured.given()
+            .when().get("/features/awesome")
+            .then().body(CoreMatchers.is("true"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void test2(boolean awesomeFeatureEnabled) {
+        Mockito.when(featuresConfig.isAwesomeFeatureEnabled()).thenReturn(awesomeFeatureEnabled); // <1>
+
+        RestAssured.given()
+            .when().get("/features/awesome")
+            .then().body(CoreMatchers.is("true"));
+    }
+}
+----
+<1> This line throws a NullPointerException if run in native mode.
+
+
+
+
+éval :
+- dépendance (mockito ou autre)
+- compatibilité avec CDI
+- config group (l'interface)
+- facilité d'implem
+- flexbilité
+- cout en temps (redémarrage)
+- mode natif
+- test ordering
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+== EN DESSOUS BROUILLON
+
+   préciser dans l'intro : on ne parle pas de %test. dans app.properties mais d'un truc dynamique
+
+   https://quarkus.io/blog/quarkus-component-test/
+
+
+command line
+
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+
+
+
+    https://www.diffblue.com/resources/guide-to-overriding-spring-boot-properties-for-testing/
+
+
+[source, java]
+----
+import
+
+@ApplicationScoped
+public class MyService {
+
+    @ConfigProperty(name = "awesome-feature-enabled", defaultValue = "false")
+    boolean awesomeFeatureEnabled;
+
+    // ommitted
+}
+----
+
+
+
+
+
+
+[WARN]
+==
+NOT ABOUT %test.blabla
+==
+
+== Constructor injection
+
+[source, java]
+----
+import jakarta.enterprise.context.ApplicationScoped;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
+
+@ApplicationScoped
+public class FeaturesService {
+
+    private final boolean awesomeFeatureEnabled;
+    private final boolean amazingFeatureEnabled;
+
+    public FeaturesService(
+        @ConfigProperty(name = "awesome-feature-enabled", defaultValue = "false") boolean awesomeFeatureEnabled,
+        @ConfigProperty(name = "amazing-feature-enabled", defaultValue = "false") boolean amazingFeatureEnabled) {
+        this.awesomeFeatureEnabled = awesomeFeatureEnabled;
+        this.amazingFeatureEnabled = amazingFeatureEnabled;
+    }
+
+    public boolean isAwesomeFeatureEnabled() {
+        return awesomeFeatureEnabled;
+    }
+
+    public boolean isAmazingFeatureEnabled() {
+        return amazingFeatureEnabled;
+    }
+}
+----
+
+[source, java]
+----
+import io.quarkus.test.junit.QuarkusTest;
+import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+@QuarkusTest
+class FeaturesServiceTest {
+
+    @Test
+    void test() {
+
+        FeaturesService featuresService = new FeaturesService(false, true);
+
+        assertFalse(featuresService.isAwesomeFeatureEnabled());
+        assertTrue(featuresService.isAmazingFeatureEnabled());
+    }
+}
+----
+
+== Reflection
+
+https://stackoverflow.com/questions/67318978/injecting-values-into-private-field-in-quarkus-test
+
+mention it as an unriable way?
+
+== System properties
+
+[source, java]
+----
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.Path;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
+
+@Path("/features")
+public class FeaturesResource {
+
+    public static final String AWESOME_FEATURE_ENABLED = "awesome-feature-enabled";
+
+    @ConfigProperty(name = AWESOME_FEATURE_ENABLED, defaultValue = "false")
+    boolean awesomeFeatureEnabled;
+
+    @GET
+    @Path("/awesome")
+    public boolean isAwesomeFeatureEnabled() {
+        return awesomeFeatureEnabled;
+    }
+}
+----
+
+[source, java]
+----
+import io.quarkus.test.junit.QuarkusTest;
+import org.junit.jupiter.api.MethodOrderer;
+import org.junit.jupiter.api.Order;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestMethodOrder;
+
+import static com.gwenneg.blog.config.FeaturesResource.AWESOME_FEATURE_ENABLED;
+import static io.restassured.RestAssured.given;
+import static org.hamcrest.CoreMatchers.is;
+
+@QuarkusTest
+@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+class FeaturesResourceTest {
+
+    @Test
+    @Order(1)
+    void test1() {
+
+        // This line has no effect on the test outcome when the test is run in native mode.
+        System.setProperty(AWESOME_FEATURE_ENABLED, "true");
+
+        given()
+                .when().get("/features/awesome")
+                .then().body(is("true"));
+    }
+
+    @Test
+    @Order(2)
+    void test2() {
+
+        System.setProperty(AWESOME_FEATURE_ENABLED, "false");
+
+        /*
+         * This test depends on a CDI bean with a singleton scope which was already initialized by the previous test.
+         * As a consequence, the outcome of this test cannot be changed from the system property.
+         */
+        given()
+                .when().get("/features/awesome")
+                .then().body(is("true"));
+    }
+}
+----
+
+
+
+
+
+== Component test
+
+
+https://quarkus.io/guides/getting-started-testing#testing-components
+
+
+[source, java]
+----
+import jakarta.enterprise.context.ApplicationScoped;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
+
+@ApplicationScoped
+public class FeaturesConfig {
+
+    @ConfigProperty(name = "awesome-feature-enabled", defaultValue = "false")
+    boolean awesomeFeatureEnabled;
+
+    @ConfigProperty(name = "amazing-feature-enabled", defaultValue = "false")
+    boolean amazingFeatureEnabled;
+
+    public boolean isAwesomeFeatureEnabled() {
+        return awesomeFeatureEnabled;
+    }
+
+    public boolean isAmazingFeatureEnabled() {
+        return amazingFeatureEnabled;
+    }
+}
+----
+
+[source, java]
+----
+import io.quarkus.test.component.QuarkusComponentTest;
+import io.quarkus.test.component.TestConfigProperty;
+import jakarta.inject.Inject;
+import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+@QuarkusComponentTest
+@TestConfigProperty(key = "amazing-feature-enabled", value = "true")
+public class FeaturesConfigTest {
+
+    // This line will cause a test failure if run in native mode because @Inject is not supported in tests annotated with @QuarkusIntegrationTest.
+    @Inject
+    FeaturesConfig featuresConfig;
+
+    @Test
+    void test() {
+
+        assertFalse(featuresConfig.isAwesomeFeatureEnabled());
+        assertTrue(featuresConfig.isAmazingFeatureEnabled());
+    }
+}
+----
+
+== Config Mapping
+
+https://quarkus.io/guides/config-mappings
+
+[source, java]
+----
+import io.smallrye.config.ConfigMapping;
+import io.smallrye.config.WithDefault;
+
+@ConfigMapping(prefix = "features")
+public interface FeaturesConfig {
+
+    @WithDefault("false")
+    boolean awesomeFeatureEnabled();
+
+    @WithDefault("false")
+    boolean amazingFeatureEnabled();
+}
+----
+
+[source, java]
+----
+import jakarta.inject.Inject;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.Path;
+
+@Path("/features")
+public class FeaturesResource {
+
+    @Inject
+    FeaturesConfig featuresConfig;
+
+    @GET
+    @Path("/awesome")
+    public boolean isAwesomeFeatureEnabled() {
+        return featuresConfig.awesomeFeatureEnabled();
+    }
+
+    @GET
+    @Path("/amazing")
+    public boolean isAmazingFeatureEnabled() {
+        return featuresConfig.amazingFeatureEnabled();
+    }
+}
+----
+
+[source, java]
+----
+import io.quarkus.test.InjectMock;
+import io.quarkus.test.Mock;
+import io.quarkus.test.junit.QuarkusTest;
+import io.smallrye.config.SmallRyeConfig;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Produces;
+import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.Config;
+import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
+
+import static io.restassured.RestAssured.given;
+import static org.hamcrest.CoreMatchers.is;
+
+@QuarkusTest
+public class FeaturesResourceTest {
+
+    @Inject
+    Config config;
+
+    @Produces // Optional
+    @ApplicationScoped
+    @Mock
+    FeaturesConfig featuresConfig() {
+        return config.unwrap(SmallRyeConfig.class).getConfigMapping(FeaturesConfig.class); // TODO link alternative way
+    }
+
+    @InjectMock
+    FeaturesConfig featuresConfig;
+
+    @Test
+    void test() {
+
+        // This line throws a NullPointerException if run in native mode.
+        Mockito.when(featuresConfig.amazingFeatureEnabled()).thenReturn(true);
+
+        given()
+                .when().get("/features/awesome")
+                .then().body(is("false"));
+
+        given()
+                .when().get("/features/amazing")
+                .then().body(is("true"));
+    }
+}
+----
+
+
