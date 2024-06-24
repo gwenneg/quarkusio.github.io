@@ -151,9 +151,9 @@ public class FeaturesConfig {
     }
 }
 ----
-<1> This method is executed at application startup. See the https://quarkus.io/guides/lifecycle#listening-for-startup-and-shutdown-events[Application initialization and termination] guide for more details about the lifecycle of Quarkus apps.
+<1> This method is executed at application startup. See the https://quarkus.io/guides/lifecycle#listening-for-startup-and-shutdown-events[Application initialization and termination] guide for more details about the application lifecycle events.
 <2> `TreeMap` helps automatically sort the map entries by keys alphabetically.
-<3> This is a nice way to include the application config into the logs.
+<3> This is a nice way to include the app config into the logs.
 It can really help identify the root cause of a failure when something goes wrong.
 Be careful not to log any sensitive config values (e.g. secrets or passwords) though!
 
@@ -207,9 +207,9 @@ class FeaturesResourceTest {
 ----
 <1> The config class is mocked with the help of the `quarkus-junit5-mockito` extension.
 Injections are not supported in tests in native mode, so this only works when the test is run in JVM mode.
-<2> This is how config values are mocked with this approach.
+<2> The configuration can be mocked from any test method or from a method annotated with one of JUnit's https://junit.org/junit5/docs/current/user-guide/#writing-tests-definitions[lifecycle annotations] such as `@BeforeEach`.
 
-Here's a variation that leverages JUnit's `@ParameterizedTest`:
+This approach can also leverage JUnit's `@ParameterizedTest` feature and test several values of a config property with a single test method:
 
 [source, java]
 ----
@@ -227,8 +227,8 @@ class FeaturesResourceTest {
     FeaturesConfig featuresConfig;
 
     @ParameterizedTest
-    @ValueSource(booleans = {true, false}) // <1>
-    void test(boolean awesomeFeatureEnabled) {
+    @ValueSource(booleans = {true, false})
+    void test(boolean awesomeFeatureEnabled) { // <1>
         Mockito.when(featuresConfig.isAwesomeFeatureEnabled()).thenReturn(awesomeFeatureEnabled);
         RestAssured.given()
             .when().get("/features/awesome")
@@ -236,7 +236,121 @@ class FeaturesResourceTest {
     }
 }
 ----
-<1> Multiple config values are tested with a single test.
+<1> When the tests are run, this method will be invoked once for each value provided with the `@ValueSource` annotation.
+
+
+
+
+
+
+
+
+
+
+
+
+
+https://quarkus.io/guides/config-mappings[Config mappings] are used to group multiple configuration properties in a single interface that share the same prefix.
+
+Quarkus test profiles can be used to override config values based on a `@ConfigMapping`.
+Here's an additional approach you may use if you need to avoid test profiles:
+
+[source, java, title=The configuration]
+----
+import io.smallrye.config.ConfigMapping;
+import io.smallrye.config.WithDefault;
+
+@ConfigMapping(prefix = "features")
+public interface FeaturesConfig {
+
+    @WithDefault("false")
+    boolean awesomeFeatureEnabled();
+}
+----
+
+[source, java, title=The code to be tested]
+----
+import jakarta.inject.Inject;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.Path;
+
+@Path("/features")
+public class FeaturesResource {
+
+    @Inject
+    FeaturesConfig featuresConfig;
+
+    @GET
+    @Path("/awesome")
+    public boolean isAwesomeFeatureEnabled() {
+        return featuresConfig.awesomeFeatureEnabled();
+    }
+}
+----
+
+[source, java, title=The test code]
+----
+import io.quarkus.test.InjectMock;
+import io.quarkus.test.Mock;
+import io.quarkus.test.junit.QuarkusTest;
+import io.smallrye.config.SmallRyeConfig;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Produces;
+import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.Config;
+import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
+
+import static io.restassured.RestAssured.given;
+import static org.hamcrest.CoreMatchers.is;
+
+@QuarkusTest
+public class FeaturesResourceTest {
+
+    @Inject
+    Config config;
+
+    @Produces // <1>
+    @ApplicationScoped
+    @Mock
+    FeaturesConfig featuresConfig() {
+        return config.unwrap(SmallRyeConfig.class).getConfigMapping(FeaturesConfig.class); // <2>
+    }
+
+    @InjectMock
+    FeaturesConfig featuresConfig;
+
+    @Test
+    void test() {
+        // This line throws a NullPointerException if run in native mode.
+        Mockito.when(featuresConfig.awesomeFeatureEnabled()).thenReturn(true);
+        given()
+                .when().get("/features/awesome")
+                .then().body(is("true"));
+    }
+}
+----
+<1> This is optional.
+<2>  // TODO link alternative way + explain
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 == Approach #3: constructor injection
 
@@ -335,90 +449,6 @@ This approach suffers from two drawbacks:
 * It only starts the service under test and not the entire Quarkus app.
 
 == Approach #5 with `@configMapping` - To be moved after #2
-
-https://quarkus.io/guides/config-mappings[Config mappings] are used to group multiple configuration properties in a single interface that share the same prefix.
-
-Quarkus test profiles can be used to override config values based on a `@ConfigMapping`.
-Here's an additional approach you may use if you need to avoid test profiles:
-
-[source, java, title=The configuration]
-----
-import io.smallrye.config.ConfigMapping;
-import io.smallrye.config.WithDefault;
-
-@ConfigMapping(prefix = "features")
-public interface FeaturesConfig {
-
-    @WithDefault("false")
-    boolean awesomeFeatureEnabled();
-}
-----
-
-[source, java, title=The code to be tested]
-----
-import jakarta.inject.Inject;
-import jakarta.ws.rs.GET;
-import jakarta.ws.rs.Path;
-
-@Path("/features")
-public class FeaturesResource {
-
-    @Inject
-    FeaturesConfig featuresConfig;
-
-    @GET
-    @Path("/awesome")
-    public boolean isAwesomeFeatureEnabled() {
-        return featuresConfig.awesomeFeatureEnabled();
-    }
-}
-----
-
-[source, java, title=The test code]
-----
-import io.quarkus.test.InjectMock;
-import io.quarkus.test.Mock;
-import io.quarkus.test.junit.QuarkusTest;
-import io.smallrye.config.SmallRyeConfig;
-import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.enterprise.inject.Produces;
-import jakarta.inject.Inject;
-import org.eclipse.microprofile.config.Config;
-import org.junit.jupiter.api.Test;
-import org.mockito.Mockito;
-
-import static io.restassured.RestAssured.given;
-import static org.hamcrest.CoreMatchers.is;
-
-@QuarkusTest
-public class FeaturesResourceTest {
-
-    @Inject
-    Config config;
-
-    @Produces // <1>
-    @ApplicationScoped
-    @Mock
-    FeaturesConfig featuresConfig() {
-        return config.unwrap(SmallRyeConfig.class).getConfigMapping(FeaturesConfig.class); // <2>
-    }
-
-    @InjectMock
-    FeaturesConfig featuresConfig;
-
-    @Test
-    void test() {
-        // This line throws a NullPointerException if run in native mode.
-        Mockito.when(featuresConfig.awesomeFeatureEnabled()).thenReturn(true);
-        given()
-                .when().get("/features/awesome")
-                .then().body(is("true"));
-    }
-}
-----
-<1> This is optional.
-<2>  // TODO link alternative way + explain
-
 
 
 
