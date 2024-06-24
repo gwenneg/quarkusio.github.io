@@ -1,12 +1,11 @@
 ---
 layout: post
-title: 'Overriding the configuration of a Quarkus app from its test code'
-date: 2024-06-22
+title: Overriding the configuration of a Quarkus app from its test code
+date: 2024-06-25
 tags: config test development-tips
-synopsis: TODO
+synopsis: Find out how to override the configuration of your Quarkus app from its test code.
 author: gwenneg
 ---
-:imagesdir: /assets/images/posts/overriding-configuration-from-test-code
 
 Overriding the configuration of a Quarkus app from its test code is often required to achieve a good test coverage.
 Whenever a config property determines how the app behaves, all possible config values need to be tested.
@@ -33,19 +32,18 @@ public class MyService {
 ----
 
 There are many ways to override the configuration from the test code.
-This post will show you several approaches, with a particular focus on the benefits and drawbacks of each of them.
+This post will show you five approaches, with a particular focus on the benefits and drawbacks of each of them.
 
 [NOTE]
 ====
-All code snippets from this post (and more!) are available as code in the https://github.com/gwenneg/blog-overriding-configuration-from-test-code[gwenneg/blog-overriding-configuration-from-test-code] repository.
+All code snippets from this post (and more!) are available in the https://github.com/gwenneg/blog-overriding-configuration-from-test-code[gwenneg/blog-overriding-configuration-from-test-code^] repository.
 ====
 
-[[test-profiles]]
 == Approach #1: Quarkus test profiles
 
-https://quarkus.io/guides/getting-started-testing#testing_different_profiles[Quarkus test profiles] are one of the best ways to override the configuration.
+https://quarkus.io/guides/getting-started-testing#testing_different_profiles[Quarkus test profiles^] are one of the best ways to override the configuration.
 They can be used while testing in native mode, unlike most approaches listed in this post.
-In addition to the config override, they provide https://quarkus.io/guides/getting-started-testing#writing-a-profile[many additional capabilities].
+In addition to the config override, they provide https://quarkus.io/guides/getting-started-testing#writing-a-profile[many additional capabilities^] which help control
 
 Test profiles suffer however from a few drawbacks.
 First, Quarkus is restarted before each test profile is used, which obviously slows down the tests execution.
@@ -151,7 +149,7 @@ public class FeaturesConfig {
     }
 }
 ----
-<1> This method is executed at application startup. See the https://quarkus.io/guides/lifecycle#listening-for-startup-and-shutdown-events[Application initialization and termination] guide for more details about the application lifecycle events.
+<1> This method is executed at application startup. See the https://quarkus.io/guides/lifecycle#listening-for-startup-and-shutdown-events[Application initialization and termination^] guide for more details about the application lifecycle events.
 <2> `TreeMap` helps automatically sort the map entries by keys alphabetically.
 <3> This is a nice way to include the app config into the logs.
 It can really help identify the root cause of a failure when something goes wrong.
@@ -207,7 +205,7 @@ class FeaturesResourceTest {
 ----
 <1> The config class is mocked with the help of the `quarkus-junit5-mockito` extension.
 Injections are not supported in tests in native mode, so this only works when the test is run in JVM mode.
-<2> The configuration can be mocked from any test method or from a method annotated with one of JUnit's https://junit.org/junit5/docs/current/user-guide/#writing-tests-definitions[lifecycle annotations] such as `@BeforeEach`.
+<2> The configuration can be mocked from any test method or from a method annotated with one of JUnit's https://junit.org/junit5/docs/current/user-guide/#writing-tests-definitions[lifecycle annotations^] such as `@BeforeEach`.
 
 This approach can also leverage the `@ParameterizedTest` feature from JUnit and test several values of a config property with a single test method:
 
@@ -238,7 +236,7 @@ class FeaturesResourceTest {
 ----
 <1> When the tests are run, this method will be invoked once for each value provided with the `@ValueSource` annotation.
 
-What if your project relies on https://quarkus.io/guides/config-mappings[config mappings]?
+What if your project relies on https://quarkus.io/guides/config-mappings[config mappings^]?
 They can be mocked too, even though it's a little trickier:
 
 [source, java, title=A configuration based on a config mapping]
@@ -367,7 +365,7 @@ This approach suffer from an obvious drawback: creating an instance from the tes
 
 == Approach #4: testing components
 
-Quarkus recently introduced a feature called https://quarkus.io/guides/getting-started-testing#testing-components[Testing components] which can be used to override the configuration from the test code.
+Quarkus recently introduced a feature called https://quarkus.io/guides/getting-started-testing#testing-components[Testing components^] which can be used to override the configuration from the test code.
 As explained in the Quarkus doc, that feature is experimental and may change in the future.
 
 [source, java, title=The code to be tested]
@@ -486,14 +484,8 @@ As a consequence, the outcome of this test cannot be changed from the system pro
 
 In this post, we discussed several approaches to override the Quarkus configuration from the test code.
 As you can see, each approach has drawbacks and none of them is perfect.
+
 You don't have to pick one of these approaches but rather combine them in the best possible way to address your needs.
-
-
-
-
-
-
-
 
 
 
@@ -510,9 +502,6 @@ You don't have to pick one of these approaches but rather combine them in the be
 
 
 
-
-
-    https://www.diffblue.com/resources/guide-to-overriding-spring-boot-properties-for-testing/
 
 
 
