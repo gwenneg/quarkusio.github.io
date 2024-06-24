@@ -209,7 +209,7 @@ class FeaturesResourceTest {
 Injections are not supported in tests in native mode, so this only works when the test is run in JVM mode.
 <2> The configuration can be mocked from any test method or from a method annotated with one of JUnit's https://junit.org/junit5/docs/current/user-guide/#writing-tests-definitions[lifecycle annotations] such as `@BeforeEach`.
 
-This approach can also leverage JUnit's `@ParameterizedTest` feature and test several values of a config property with a single test method:
+This approach can also leverage the `@ParameterizedTest` feature from JUnit and test several values of a config property with a single test method:
 
 [source, java]
 ----
@@ -238,24 +238,10 @@ class FeaturesResourceTest {
 ----
 <1> When the tests are run, this method will be invoked once for each value provided with the `@ValueSource` annotation.
 
+What if your project relies on https://quarkus.io/guides/config-mappings[config mappings]?
+They can be mocked too, even though it's a little trickier:
 
-
-
-
-
-
-
-
-
-
-
-
-https://quarkus.io/guides/config-mappings[Config mappings] are used to group multiple configuration properties in a single interface that share the same prefix.
-
-Quarkus test profiles can be used to override config values based on a `@ConfigMapping`.
-Here's an additional approach you may use if you need to avoid test profiles:
-
-[source, java, title=The configuration]
+[source, java, title=A configuration based on a config mapping]
 ----
 import io.smallrye.config.ConfigMapping;
 import io.smallrye.config.WithDefault;
@@ -308,13 +294,13 @@ import static org.hamcrest.CoreMatchers.is;
 public class FeaturesResourceTest {
 
     @Inject
-    Config config;
+    Config config; // <1>
 
-    @Produces // <1>
+    @Produces // <2>
     @ApplicationScoped
     @Mock
-    FeaturesConfig featuresConfig() {
-        return config.unwrap(SmallRyeConfig.class).getConfigMapping(FeaturesConfig.class); // <2>
+    FeaturesConfig featuresConfig() { // <3>
+        return config.unwrap(SmallRyeConfig.class).getConfigMapping(FeaturesConfig.class);
     }
 
     @InjectMock
@@ -322,35 +308,16 @@ public class FeaturesResourceTest {
 
     @Test
     void test() {
-        // This line throws a NullPointerException if run in native mode.
         Mockito.when(featuresConfig.awesomeFeatureEnabled()).thenReturn(true);
-        given()
+        RestAssured.given()
                 .when().get("/features/awesome")
-                .then().body(is("true"));
+                .then().body(CoreMatchers.is("true"));
     }
 }
 ----
-<1> This is optional.
-<2>  // TODO link alternative way + explain
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+<1> Be careful about the import. This class comes from MicroProfile Config.
+<2> This annotation can be omitted.
+<3> We need to make the interface implementation proxyable, so that it can be mocked with `@InjectMock`.
 
 == Approach #3: constructor injection
 
@@ -394,7 +361,7 @@ class FeaturesServiceTest {
     }
 }
 ----
-<1> The configuration is overridden by instantiating the CDI bean to be tested.
+<1> The configuration is overridden by manually instantiating the CDI bean to be tested.
 
 This approach suffer from an obvious drawback: creating an instance from the test code will break CDI.
 
@@ -403,7 +370,7 @@ This approach suffer from an obvious drawback: creating an instance from the tes
 Quarkus recently introduced a feature called https://quarkus.io/guides/getting-started-testing#testing-components[Testing components] which can be used to override the configuration from the test code.
 As explained in the Quarkus doc, that feature is experimental and may change in the future.
 
-[source, java]
+[source, java, title=The code to be tested]
 ----
 import jakarta.enterprise.context.ApplicationScoped;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -420,7 +387,7 @@ public class FeaturesService {
 }
 ----
 
-[source, java]
+[source, java, title=The test code]
 ----
 import io.quarkus.test.component.QuarkusComponentTest;
 import io.quarkus.test.component.TestConfigProperty;
@@ -443,32 +410,83 @@ public class FeaturesConfigTest {
 ----
 <1> `@TestConfigProperty` can also be placed on the test class.
 
-This approach suffers from two drawbacks:
+This approach won't work with native testing because it relies on an injection.
+Furthermore, it only starts the service under test and not the entire Quarkus app.
 
-* It is not supported in native mode because it relies on an injection.
-* It only starts the service under test and not the entire Quarkus app.
+== Approach #5: system properties
 
-== Approach #5 with `@configMapping` - To be moved after #2
+I would definitely NOT recommend this approach but it does exist and kinda works, so I guess it's worth mentioning in this post.
+System properties can be used to override the configuration from the test code, but that only works once with `@ApplicationScoped` or `@Singleton` CDI beans, before they've been initialized.
+As a consequence, system properties are far from being a good way to override the configuration from the test code.
 
+No native mode.
 
+Same from command line with -Dawesome-feature-enabled=true
 
+[source, java, title=The code to be tested]
+----
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.Path;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 
+@Path("/features")
+public class FeaturesResource {
 
+    @ConfigProperty(name = "awesome-feature-enabled", defaultValue = "false")
+    boolean awesomeFeatureEnabled;
 
+    @GET
+    @Path("/awesome")
+    public boolean isAwesomeFeatureEnabled() {
+        return awesomeFeatureEnabled;
+    }
+}
+----
 
-éval :
-- dépendance (mockito ou autre)
-- compatibilité avec CDI
-- config group (l'interface)
-- facilité d'implem
-- flexbilité
-- cout en temps (redémarrage)
-- mode natif
-- test ordering
+[source, java, title=The test code]
+----
+import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.RestAssured;
+import org.hamcrest.CoreMatchers;
+import org.junit.jupiter.api.MethodOrderer;
+import org.junit.jupiter.api.Order;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestMethodOrder;
 
+@QuarkusTest
+@TestMethodOrder(MethodOrderer.OrderAnnotation.class) // <1>
+class FeaturesResourceTest {
 
+    @Test
+    @Order(1) // <2>
+    void test1() {
+        System.setProperty("awesome-feature-enabled", "true");
+        RestAssured.given()
+                .when().get("/features/awesome")
+                .then().body(CoreMatchers.is("true"));
+    }
 
+    @Test
+    @Order(2) // <3>
+    void test2() {
+        System.setProperty("awesome-feature-enabled", "false");
+        RestAssured.given()
+                .when().get("/features/awesome")
+                .then().body(CoreMatchers.is("true")); // <4>
+    }
+}
+----
+<1> In this code snippet, tests are run in a fixed order to demonstrate a limitation of system properties.
+<2> This test is always run first.
+<3> This test is always run last.
+<4> This test depends on a CDI bean with a singleton scope which was already initialized by the previous test.
+As a consequence, the outcome of this test cannot be changed from the system property.
 
+== Conclusion
+
+In this post, we discussed several approaches to override the Quarkus configuration from the test code.
+As you can see, each approach has drawbacks and none of them is perfect.
+You don't have to pick one of these approaches but rather combine them in the best possible way to address your needs.
 
 
 
@@ -489,45 +507,15 @@ This approach suffers from two drawbacks:
 
    préciser dans l'intro : on ne parle pas de %test. dans app.properties mais d'un truc dynamique
 
-   https://quarkus.io/blog/quarkus-component-test/
 
 
-command line
-
-
-    @ParameterizedTest
-    @ValueSource(booleans = {true, false})
 
 
 
     https://www.diffblue.com/resources/guide-to-overriding-spring-boot-properties-for-testing/
 
 
-[source, java]
-----
-import
 
-@ApplicationScoped
-public class MyService {
-
-    @ConfigProperty(name = "awesome-feature-enabled", defaultValue = "false")
-    boolean awesomeFeatureEnabled;
-
-    // ommitted
-}
-----
-
-
-
-
-
-
-[WARN]
-==
-NOT ABOUT %test.blabla
-==
-
-== Constructor injection
 
 
 == Reflection
@@ -536,77 +524,5 @@ https://stackoverflow.com/questions/67318978/injecting-values-into-private-field
 
 mention it as an unriable way?
 
-== System properties
-
-[source, java]
-----
-import jakarta.ws.rs.GET;
-import jakarta.ws.rs.Path;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
-
-@Path("/features")
-public class FeaturesResource {
-
-    public static final String AWESOME_FEATURE_ENABLED = "awesome-feature-enabled";
-
-    @ConfigProperty(name = AWESOME_FEATURE_ENABLED, defaultValue = "false")
-    boolean awesomeFeatureEnabled;
-
-    @GET
-    @Path("/awesome")
-    public boolean isAwesomeFeatureEnabled() {
-        return awesomeFeatureEnabled;
-    }
-}
-----
-
-[source, java]
-----
-import io.quarkus.test.junit.QuarkusTest;
-import org.junit.jupiter.api.MethodOrderer;
-import org.junit.jupiter.api.Order;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.TestMethodOrder;
-
-import static com.gwenneg.blog.config.FeaturesResource.AWESOME_FEATURE_ENABLED;
-import static io.restassured.RestAssured.given;
-import static org.hamcrest.CoreMatchers.is;
-
-@QuarkusTest
-@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-class FeaturesResourceTest {
-
-    @Test
-    @Order(1)
-    void test1() {
-
-        // This line has no effect on the test outcome when the test is run in native mode.
-        System.setProperty(AWESOME_FEATURE_ENABLED, "true");
-
-        given()
-                .when().get("/features/awesome")
-                .then().body(is("true"));
-    }
-
-    @Test
-    @Order(2)
-    void test2() {
-
-        System.setProperty(AWESOME_FEATURE_ENABLED, "false");
-
-        /*
-         * This test depends on a CDI bean with a singleton scope which was already initialized by the previous test.
-         * As a consequence, the outcome of this test cannot be changed from the system property.
-         */
-        given()
-                .when().get("/features/awesome")
-                .then().body(is("true"));
-    }
-}
-----
 
 
-
-
-
-== Config Mapping
