@@ -39,7 +39,7 @@ This post will show you five approaches, with a particular focus on the benefits
 All code snippets from this post (and more!) are available in the https://github.com/gwenneg/blog-overriding-configuration-from-test-code[gwenneg/blog-overriding-configuration-from-test-code^] repository.
 ====
 
-== Approach #1: Quarkus test profiles
+== [[quarkus-test-profiles]] Approach #1: Quarkus test profiles
 
 https://quarkus.io/guides/getting-started-testing#testing_different_profiles[Quarkus test profiles^] are one of the best ways to override the configuration.
 They can be used while testing in native mode, unlike most approaches listed in this post.
@@ -325,7 +325,7 @@ public class FeaturesResourceTest {
 == Approach #3: constructor injection
 
 What if you need native testing in a big project that suffers from the Quarkus test profiles drawbacks mentioned earlier in this post?
-Injecting the configuration in your CDI beans constructors might be the right approach for you.
+Injecting the configuration through your CDI beans constructors might be the right approach for you.
 
 [source, java, title=The code to be tested]
 ----
@@ -358,32 +358,30 @@ import org.junit.jupiter.api.Test;
 public class FeaturesServiceTest {
 
     @Test
-    void testFalse() {
-        FeaturesService featuresService = new FeaturesService(false); // <1>
-        Assertions.assertFalse(featuresService.isAwesomeFeatureEnabled());
-    }
-
-    @Test
-    void testTrue() {
+    void test() {
         FeaturesService featuresService = new FeaturesService(true); // <1>
         Assertions.assertTrue(featuresService.isAwesomeFeatureEnabled());
     }
 }
 ----
-<1> The configuration is overridden from the test when the CDI bean constructor is invoked.
+<1> The configuration is overridden from the test when the bean constructor is invoked.
 
-
-
-
-This approach suffers from an obvious drawback: creating an instance from the test code will break CDI.
-
-
-
+With this approach, no injections will be performed by CDI when the tests are run because the bean is instantiated manually instead of being managed by the CDI container from Quarkus.
+That drawback can be mitigated by injecting all dependencies (other beans and/or configuration) through the constructor of the tested bean.
+When that is done, CDI injections still won't work but the test code will be able to provide all dependencies required for the test execution.
 
 == Approach #4: testing components
 
-Quarkus recently introduced a feature called https://quarkus.io/guides/getting-started-testing#testing-components[Testing components^] which can be used to override the configuration from the test code.
-As explained in the Quarkus doc, that feature is experimental and may change in the future.
+Quarkus recently introduced an experimental feature called https://quarkus.io/guides/getting-started-testing#testing-components[Testing components^] which can be used to override the configuration from the test code.
+That feature is provided by the `quarkus-junit5-component` extension.
+
+This approach doesn't start the full Quarkus app.
+It only starts the CDI container and injects the fields from the test which are annotated with `@jakarta.inject.Inject` or `@io.quarkus.test.InjectMock`.
+It can therefore be much faster, especially in bigger projects, than the full Quarkus app restarts that come with <<quarkus-test-profiles,Quarkus test profiles>>.
+
+This approach doesn't work with native testing because it relies on injections in the test code, which are only supported when the tests are run in JVM mode.
+
+Let's see how that works:
 
 [source, java, title=The code to be tested]
 ----
@@ -396,8 +394,15 @@ public class FeaturesService {
     @ConfigProperty(name = "awesome-feature-enabled", defaultValue = "false")
     boolean awesomeFeatureEnabled;
 
+    @ConfigProperty(name = "amazing-feature-enabled", defaultValue = "false")
+    boolean amazingFeatureEnabled;
+
     public boolean isAwesomeFeatureEnabled() {
         return awesomeFeatureEnabled;
+    }
+
+    public boolean isAmazingFeatureEnabled() {
+        return amazingFeatureEnabled;
     }
 }
 ----
@@ -407,36 +412,32 @@ public class FeaturesService {
 import io.quarkus.test.component.QuarkusComponentTest;
 import io.quarkus.test.component.TestConfigProperty;
 import jakarta.inject.Inject;
-import static org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-@QuarkusComponentTest
+@QuarkusComponentTest // <1>
+@TestConfigProperty(key = "awesome-feature-enabled", value = "true") // <2>
 public class FeaturesConfigTest {
 
     @Inject
     FeaturesService featuresService;
 
     @Test
-    @TestConfigProperty(key = "awesome-feature-enabled", value = "true") // <1>
+    @TestConfigProperty(key = "amazing-feature-enabled", value = "true") // <2>
     void test() {
         Assertions.assertTrue(featuresService.isAwesomeFeatureEnabled());
+        Assertions.assertTrue(featuresService.isAmazingFeatureEnabled());
     }
 }
 ----
-<1> `@TestConfigProperty` can also be placed on the test class.
-
-This approach won't work with native testing because it relies on an injection.
-Furthermore, it only starts the service under test and not the entire Quarkus app.
+<1> The usual `@QuarkusTest` annotation has been replaced with `@QuarkusComponentTest`.
+<2> `@TestConfigProperty` can be used on the test class, a test method or both.
 
 == Approach #5: system properties
 
-I would definitely NOT recommend this approach but it does exist and kinda works, so I guess it's worth mentioning in this post.
-System properties can be used to override the configuration from the test code, but that only works once with `@ApplicationScoped` or `@Singleton` CDI beans, before they've been initialized.
-As a consequence, system properties are far from being a good way to override the configuration from the test code.
-
-No native mode.
-
-Same from command line with -Dawesome-feature-enabled=true
+I would definitely NOT recommend this approach, but it does exist and it kinda works, so I'll mention it anyway.
+System properties can be used to override the configuration from the test code, but that only works once with `@ApplicationScoped` or `@Singleton` beans, before they've been initialized.
+After their initialization, any changes made to system properties will have no effect on these beans.
 
 [source, java, title=The code to be tested]
 ----
@@ -458,6 +459,15 @@ public class FeaturesResource {
 }
 ----
 
+System properties can be set from the command line with Maven or Gradle:
+
+[source, shell, title=Maven command]
+----
+./mvnw verify -Dawesome-feature-enabled=true
+----
+
+They can also be set from the test code:
+
 [source, java, title=The test code]
 ----
 import io.quarkus.test.junit.QuarkusTest;
@@ -474,30 +484,59 @@ class FeaturesResourceTest {
 
     @Test
     @Order(1) // <2>
-    void test1() {
-        System.setProperty("awesome-feature-enabled", "true");
+    void firstTest() {
+        System.setProperty("awesome-feature-enabled", "true"); // <3>
         RestAssured.given()
                 .when().get("/features/awesome")
                 .then().body(CoreMatchers.is("true"));
     }
 
     @Test
-    @Order(2) // <3>
-    void test2() {
+    @Order(2) // <4>
+    void lastTest() {
         System.setProperty("awesome-feature-enabled", "false");
         RestAssured.given()
                 .when().get("/features/awesome")
-                .then().body(CoreMatchers.is("true")); // <4>
+                .then().body(CoreMatchers.is("true")); // <5>
     }
 }
 ----
 <1> In this code snippet, tests are run in a fixed order to demonstrate a limitation of system properties.
 <2> This test is always run first.
-<3> This test is always run last.
-<4> This test depends on a CDI bean with a singleton scope which was already initialized by the previous test.
+<3> This has no effect when the test is run in native mode.
+<4> This test is always run last.
+<5> This test depends on a CDI bean with a default `@Singleton` scope which was already initialized by the previous test.
 As a consequence, the outcome of this test cannot be changed from the system property.
 
+== Off-topic: the `application.properties` file
+
+You may wonder why I didn't mention the `application.properties` file sooner in this post.
+It can indeed be used to change the configuration of a Quarkus app while testing it.
+
+[source, properties, title=application.properties]
+----
+awesome-feature-enabled=false
+%test.awesome-feature-enabled=true
+----
+
+There is however a big difference between that file and all the approaches listed above:
+
+* the `application.properties` file is a static resource which cannot be changed while running the tests
+* all approaches from this post are dynamic and used from the test code
+
+
+
 == Conclusion
+
+
+
+
+
+
+
+
+
+
 
 In this post, we discussed several approaches to override the Quarkus configuration from the test code.
 As you can see, each approach has drawbacks and none of them is perfect.
