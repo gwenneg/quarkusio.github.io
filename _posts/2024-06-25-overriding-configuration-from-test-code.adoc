@@ -115,7 +115,7 @@ Now, here's my favorite approach when native testing isn't required.
 First, the config properties need to be moved to a dedicated `@ApplicationScoped` bean.
 That bean may or may not be used to centralize all config properties from the Quarkus app.
 
-[source, java, title="Centralized config class, with logging at application startup"]
+[source, java, title="A centralized config class, with logging at application startup"]
 ----
 import io.quarkus.logging.Log;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -324,15 +324,15 @@ public class FeaturesResourceTest {
 
 == Approach #3: constructor injection
 
-What if you need native testing in a big project that suffers from the Quarkus test profiles drawbacks?
-Injecting the configuration in your CDI beans constructor might be the right approach for you.
+What if you need native testing in a big project that suffers from the Quarkus test profiles drawbacks mentioned earlier in this post?
+Injecting the configuration in your CDI beans constructors might be the right approach for you.
 
 [source, java, title=The code to be tested]
 ----
-import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Singleton;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
-@ApplicationScoped
+@Singleton
 public class FeaturesService {
 
     private final boolean awesomeFeatureEnabled;
@@ -346,7 +346,7 @@ public class FeaturesService {
     }
 }
 ----
-<1> The configuration is injected in the CDI bean constructor.
+<1> The configuration is injected in the constructor of the CDI bean.
 
 [source, java, title=The test code]
 ----
@@ -355,18 +355,30 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 @QuarkusTest
-class FeaturesServiceTest {
+public class FeaturesServiceTest {
 
     @Test
-    void test() {
+    void testFalse() {
+        FeaturesService featuresService = new FeaturesService(false); // <1>
+        Assertions.assertFalse(featuresService.isAwesomeFeatureEnabled());
+    }
+
+    @Test
+    void testTrue() {
         FeaturesService featuresService = new FeaturesService(true); // <1>
         Assertions.assertTrue(featuresService.isAwesomeFeatureEnabled());
     }
 }
 ----
-<1> The configuration is overridden by manually instantiating the CDI bean to be tested.
+<1> The configuration is overridden from the test when the CDI bean constructor is invoked.
 
-This approach suffer from an obvious drawback: creating an instance from the test code will break CDI.
+
+
+
+This approach suffers from an obvious drawback: creating an instance from the test code will break CDI.
+
+
+
 
 == Approach #4: testing components
 
